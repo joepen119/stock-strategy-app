@@ -160,6 +160,22 @@ def add_ticker_callback():
     st.session_state.new_ticker_input = ""
 
 
+# 定義彈出視窗 (Dialog) 函式
+@st.dialog("📋 Telegram 發報內容預覽")
+def show_alert_dialog(msg):
+  st.success("✅ Telegram 訊息已成功發送！")
+  st.markdown("以下是本次發送的詳細內容：")
+  # 將 HTML 標籤轉換為 Markdown 格式以供畫面美觀顯示
+  clean_msg = (
+      msg.replace("<b>", "**")
+      .replace("</b>", "**")
+      .replace("-------------------", "---")
+  )
+  st.markdown(clean_msg)
+  if st.button("關閉視窗", use_container_width=True):
+    st.rerun()
+
+
 # 側邊欄設定
 with st.sidebar:
   st.header("⚙️ 監控清單與參數設定")
@@ -308,9 +324,8 @@ if summary_list:
       with st.spinner("正在發送 Telegram 推播..."):
         success = send_telegram_alert(alert_msg)
         if success:
-          st.success("✅ Telegram 推播發送成功！")
-          # 彈出視窗顯示發報內容預覽
-          st.info(f"📋 **本次發報內容預覽**：\n\n{alert_msg.replace('<B>', '**').replace('</B>', '**').replace('<br>', '\n')}")
+          # 呼叫彈出視窗展示發報內容
+          show_alert_dialog(alert_msg)
         else:
           st.error("❌ 發送失敗，請確認 Streamlit Secrets 設定是否正確。")
 
