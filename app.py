@@ -1,4 +1,6 @@
 from datetime import datetime
+import json
+import os
 import pandas as pd
 import plotly.graph_objects as go
 import requests
@@ -9,6 +11,37 @@ import yfinance as yf
 st.set_page_config(
     page_title="海龜交易策略看盤系統", page_icon="📈", layout="wide"
 )
+
+# 清單儲存檔案路徑
+WATCHLIST_FILE = "watchlist.json"
+DEFAULT_TICKERS = ["2330.TW", "0050.TW", "00878.TW", "2317.TW", "2454.TW"]
+
+
+# 讀取清單函式
+def load_watchlist():
+  if os.path.exists(WATCHLIST_FILE):
+    try:
+      with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        if isinstance(data, list) and len(data) > 0:
+          return data
+    except Exception:
+      pass
+  return DEFAULT_TICKERS.copy()
+
+
+# 儲存清單函式
+def save_watchlist(tickers_list):
+  try:
+    with open(WATCHLIST_FILE, "w", encoding="utf-8") as f:
+      json.dump(tickers_list, f, ensure_ascii=False, indent=2)
+  except Exception:
+    pass
+
+
+# 初始化 Session State
+if "watchlist" not in st.session_state:
+  st.session_state.watchlist = load_watchlist()
 
 
 # 發送 Telegram 訊息的函式
@@ -25,15 +58,59 @@ def send_telegram_alert(message):
     return False
 
 
+# 處理新增股票代號的回呼函式
+def add_ticker_callback():
+  raw_input = st.session_state.new_ticker_input.strip().upper()
+  if raw_input:
+    # 若純數字（台股代號），自動補上 .TW
+    if raw_input.isdigit():
+      formatted_ticker = f"{raw_input}.TW"
+    else:
+      formatted_ticker = raw_input
+
+    if formatted_ticker not in st.session_state.watchlist:
+      st.session_state.watchlist.append(formatted_ticker)
+      save_watchlist(st.session_state.watchlist)
+      st.toast(f"✅ 已將 {formatted_ticker} 加入監控清單！")
+    else:
+      st.toast(f"⚠️ {formatted_ticker} 已經在清單內囉！")
+
+    # 清空輸入框
+    st.session_state.new_ticker_input = ""
+
+
 # 側邊欄設定
 with st.sidebar:
   st.header("⚙️ 監控清單與參數設定")
-  default_tickers = "2330.TW, 0050.TW, 006208.TW, 2317.TW, 2454.TW"
-  tickers_input = st.text_area(
-      "輸入股票代號 (以逗號分隔，台股請加 .TW 或 .TWO)",
-      value=default_tickers,
-      height=100,
+
+  # 直接輸入代號並自動加入清單
+  st.text_input(
+      "輸入股票代號 (按 Enter 自動加入)",
+      key="new_ticker_input",
+      placeholder="例如：2603 或 00919 或 NVDA",
+      on_change=add_ticker_callback,
   )
+  st.button("➕ 加入清單", on_click=add_ticker_callback, use_container_width=True)
+
+  st.caption(
+      "💡 提示：台股上市股票直接輸入數字（如 `2330`）會自動補上"
+      " `.TW`；上櫃請輸入完整代號（如 `6488.TWO`）。"
+  )
+
+  # 管理目前清單（可點選 X 移除不要的股票）
+  updated_list = st.multiselect(
+      "目前監控清單 (點擊 × 可移除)",
+      options=st.session_state.watchlist,
+      default=st.session_state.watchlist,
+  )
+
+  # 若使用者透過 multiselect 移除了項目，同步更新狀態與檔案
+  if updated_list != st.session_state.watchlist:
+    st.session_state.watchlist = updated_list
+    save_watchlist(st.session_state.watchlist)
+    st.rerun()
+
+  st.divider()
 
   buy_window = st.number_input(
       "突破買進天數 (日)", min_value=5, max_value=60, value=10
@@ -51,11 +128,10 @@ with st.sidebar:
 st.title("📈 海龜突破策略看盤系統")
 st.markdown(f"更新時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-# 處理股票代號清單
-tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
+tickers = st.session_state.watchlist
 
 if not tickers:
-  st.warning("請在左側輸入至少一檔股票代號。")
+  st.warning("目前監控清單是空的，請在左側輸入股票代號新增。")
   st.stop()
 
 # 抓取資料並計算訊號
@@ -69,7 +145,10 @@ with st.spinner("正在從 Yahoo Finance 獲取最新股價資料..."):
       df = yf.download(ticker, period="6mo", interval="1d", progress=False)
 
       if df.empty or len(df) < sell_window + 1:
-        st.warning(f"⚠️ 無法取得 {ticker} 的完整歷史資料，請確認代號是否正確。")
+        st.warning(
+            f"⚠️ 無法取得 {ticker}"
+            " 的完整歷史資料，請確認代號是否正確（上櫃股票請加 .TWO）。"
+        )
         continue
 
       # 處理 yfinance 可能回傳的多層欄位 (MultiIndex)
