@@ -165,7 +165,6 @@ def add_ticker_callback():
 def show_alert_dialog(msg):
   st.success("✅ Telegram 訊息已成功發送！")
   st.markdown("以下是本次發送的詳細內容：")
-  # 將 HTML 標籤轉換為 Markdown 格式以供畫面美觀顯示
   clean_msg = (
       msg.replace("<b>", "**")
       .replace("</b>", "**")
@@ -236,7 +235,7 @@ with st.spinner("正在從 Yahoo Finance 獲取最新股價與智慧對照名稱
   for ticker in tickers:
     try:
       stock_name = get_stock_name(ticker)
-      display_name = f"{ticker} ({stock_name})"
+      display_label = f"{ticker} ({stock_name})"  # 供圖表下拉選單與 Telegram 使用
 
       df = yf.download(ticker, period="6mo", interval="1d", progress=False)
 
@@ -269,7 +268,8 @@ with st.spinner("正在從 Yahoo Finance 獲取最新股價與智慧對照名稱
         status = "👀 盤整觀望中"
 
       summary_list.append({
-          "代號與名稱": display_name,
+          "股票代號": ticker,
+          "股票名稱": stock_name,
           "現價": round(current_price, 2),
           "狀態": status,
           f"前{buy_window}日高(買點)": round(buy_target, 2),
@@ -278,7 +278,7 @@ with st.spinner("正在從 Yahoo Finance 獲取最新股價與智慧對照名稱
           "距賣出": f"{dist_to_sell:+.2f}%",
       })
 
-      stock_data_dict[display_name] = df
+      stock_data_dict[display_label] = df
 
     except Exception as e:
       st.error(f"讀取 {ticker} 時發生錯誤：{e}")
@@ -294,7 +294,6 @@ if summary_list:
     st.divider()
     st.header("🔔 推播通知設定")
     if st.button("📤 發送今日買賣訊號到 Telegram", use_container_width=True):
-      # 過濾出有觸發買進或賣出的股票
       triggered_items = [
           item
           for item in summary_list
@@ -314,7 +313,7 @@ if summary_list:
         )
         for item in triggered_items:
           alert_msg += (
-              f"<b>{item['代號與名稱']}</b> | 現價: <b>{item['現價']}</b>\n"
+              f"<b>{item['股票代號']} {item['股票名稱']}</b> | 現價: <b>{item['現價']}</b>\n"
               f"狀態: <b>{item['狀態']}</b>\n"
               f"買點({item[f'前{buy_window}日高(買點)']}): 距 {item['距買進']}\n"
               f"賣點({item[f'前{sell_window}日低(賣點)']}): 距 {item['距賣出']}\n"
@@ -324,7 +323,6 @@ if summary_list:
       with st.spinner("正在發送 Telegram 推播..."):
         success = send_telegram_alert(alert_msg)
         if success:
-          # 呼叫彈出視窗展示發報內容
           show_alert_dialog(alert_msg)
         else:
           st.error("❌ 發送失敗，請確認 Streamlit Secrets 設定是否正確。")
