@@ -12,9 +12,26 @@ st.set_page_config(
     page_title="海龜交易策略看盤系統", page_icon="📈", layout="wide"
 )
 
-# 清單儲存檔案路徑
+# 清單與名稱快取儲存檔案路徑
 WATCHLIST_FILE = "watchlist.json"
+NAMES_CACHE_FILE = "names_cache.json"
 DEFAULT_TICKERS = ["2330.TW", "0050.TW", "00878.TW", "2317.TW", "2454.TW"]
+
+# 常見台股/ETF 內建中文名稱對照表 (您可以隨時在此擴充)
+STOCK_NAME_MAP = {
+    "2330.TW": "台積電",
+    "0050.TW": "元大台灣50",
+    "00878.TW": "國泰永續高股息",
+    "2317.TW": "鴻海",
+    "2454.TW": "聯發科",
+    "00919.TW": "群益台灣精選高息",
+    "00929.TW": "復華台灣科技優息",
+    "00981A.TW": "主動統一台股增長",
+    "2603.TW": "長榮",
+    "2308.TW": "台達電",
+    "2881.TW": "富邦金",
+    "2882.TW": "國泰金",
+}
 
 
 # 讀取清單函式
@@ -39,6 +56,26 @@ def save_watchlist(tickers_list):
     pass
 
 
+# 讀取名稱快取函式
+def load_names_cache():
+  if os.path.exists(NAMES_CACHE_FILE):
+    try:
+      with open(NAMES_CACHE_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+    except Exception:
+      pass
+  return {}
+
+
+# 儲存名稱快取函式
+def save_names_cache(cache_dict):
+  try:
+    with open(NAMES_CACHE_FILE, "w", encoding="utf-8") as f:
+      json.dump(cache_dict, f, ensure_ascii=False, indent=2)
+  except Exception:
+    pass
+
+
 # 初始化 Session State
 if "watchlist" not in st.session_state:
   st.session_state.watchlist = load_watchlist()
@@ -58,21 +95,54 @@ def send_telegram_alert(message):
     return False
 
 
-# 取得股票中文/公司名稱的輔助函式
-@st.cache_data(ttl=86400)  # 快取一天，避免重複查詢
+# 智慧抓取與比對股票名稱的函式 (內建對照表 -> 本地快取 -> Yahoo API 查詢)
 def get_stock_name(ticker):
+  # 1. 優先比對內建對照表
+  if ticker in STOCK_NAME_MAP:
+    return STOCK_NAME_MAP[ticker]
+
+  # 2. 檢查本地快取檔案
+  names_cache = load_names_cache()
+  if ticker in names_cache:
+    return names_cache[ticker]
+
+  # 3. 透過 Yahoo Finance 搜尋 API 自動查詢名稱
+  try:
+    url = f"https://query1.finance.yahoo.com/v1/finance/search?q={ticker}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    resp = requests.get(url, headers=headers, timeout=5)
+    if resp.status_code == 200:
+      data = resp.json()
+      quotes = data.get("quotes", [])
+      if quotes:
+        found_name = (
+            quotes[0].get("longname")
+            or quotes[0].get("shortname")
+            or quotes[0].get("symbol")
+        )
+        if found_name:
+          names_cache[ticker] = found_name
+          save_names_cache(names_cache)
+          return found_name
+  except Exception:
+    pass
+
+  # 4. 備用方案：透過 yfinance info 抓取
   try:
     stock = yf.Ticker(ticker)
     info = stock.info
-    # 優先抓取中文名稱或長期慣用名稱，若無則抓 shortName 或 longName
     name = (
         info.get("longName")
         or info.get("shortName")
         or info.get("symbol", ticker)
     )
+    names_cache[ticker] = name
+    save_names_cache(names_cache)
     return name
   except Exception:
-    return ticker
+    pass
+
+  return ticker
 
 
 # 處理新增股票代號的回呼函式
@@ -155,10 +225,10 @@ if not tickers:
 summary_list = []
 stock_data_dict = {}
 
-with st.spinner("正在從 Yahoo Finance 獲取最新股價與名稱資料..."):
+with st.spinner("正在從 Yahoo Finance 獲取最新股價與智慧對照名稱..."):
   for ticker in tickers:
     try:
-      # 取得股票名稱
+      # 透過智慧對照與快取取得名稱
       stock_name = get_stock_name(ticker)
       display_name = f"{ticker} ({stock_name})"
 
