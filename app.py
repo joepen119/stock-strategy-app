@@ -95,18 +95,15 @@ def send_telegram_alert(message):
     return False
 
 
-# 智慧抓取與比對股票名稱的函式 (內建對照表 -> 本地快取 -> Yahoo API 查詢)
+# 智慧抓取與比對股票名稱的函式
 def get_stock_name(ticker):
-  # 1. 優先比對內建對照表
   if ticker in STOCK_NAME_MAP:
     return STOCK_NAME_MAP[ticker]
 
-  # 2. 檢查本地快取檔案
   names_cache = load_names_cache()
   if ticker in names_cache:
     return names_cache[ticker]
 
-  # 3. 透過 Yahoo Finance 搜尋 API 自動查詢名稱
   try:
     url = f"https://query1.finance.yahoo.com/v1/finance/search?q={ticker}"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -127,7 +124,6 @@ def get_stock_name(ticker):
   except Exception:
     pass
 
-  # 4. 備用方案：透過 yfinance info 抓取
   try:
     stock = yf.Ticker(ticker)
     info = stock.info
@@ -149,7 +145,6 @@ def get_stock_name(ticker):
 def add_ticker_callback():
   raw_input = st.session_state.new_ticker_input.strip().upper()
   if raw_input:
-    # 支援台股代號與帶英文字母的主動式 ETF（如 00981A 自動補 .TW）
     if raw_input[0].isdigit() and "." not in raw_input:
       formatted_ticker = f"{raw_input}.TW"
     else:
@@ -162,7 +157,6 @@ def add_ticker_callback():
     else:
       st.toast(f"⚠️ {formatted_ticker} 已經在清單內囉！")
 
-    # 清空輸入框
     st.session_state.new_ticker_input = ""
 
 
@@ -170,7 +164,6 @@ def add_ticker_callback():
 with st.sidebar:
   st.header("⚙️ 監控清單與參數設定")
 
-  # 直接輸入代號並自動加入清單
   st.text_input(
       "輸入股票代號 (按 Enter 自動加入)",
       key="new_ticker_input",
@@ -184,14 +177,12 @@ with st.sidebar:
       " `00981A`）會自動補上 `.TW`；上櫃請輸入完整代號（如 `6488.TWO`）。"
   )
 
-  # 管理目前清單（可點選 X 移除不要的股票）
   updated_list = st.multiselect(
       "目前監控清單 (點擊 × 可移除)",
       options=st.session_state.watchlist,
       default=st.session_state.watchlist,
   )
 
-  # 若使用者透過 multiselect 移除了項目，同步更新狀態與檔案
   if updated_list != st.session_state.watchlist:
     st.session_state.watchlist = updated_list
     save_watchlist(st.session_state.watchlist)
@@ -228,11 +219,9 @@ stock_data_dict = {}
 with st.spinner("正在從 Yahoo Finance 獲取最新股價與智慧對照名稱..."):
   for ticker in tickers:
     try:
-      # 透過智慧對照與快取取得名稱
       stock_name = get_stock_name(ticker)
       display_name = f"{ticker} ({stock_name})"
 
-      # 抓取足夠計算 60 日均線與高低點的歷史資料 (抓 6 個月)
       df = yf.download(ticker, period="6mo", interval="1d", progress=False)
 
       if df.empty or len(df) < sell_window + 1:
@@ -242,11 +231,9 @@ with st.spinner("正在從 Yahoo Finance 獲取最新股價與智慧對照名稱
         )
         continue
 
-      # 處理 yfinance 可能回傳的多層欄位 (MultiIndex)
       if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
 
-      # 計算前 N 日最高收盤價與前 M 日最低收盤價 (使用 shift(1) 避免未來函數，代表「前」N日)
       df["Buy_Line"] = df["Close"].rolling(window=buy_window).max().shift(1)
       df["Sell_Line"] = df["Close"].rolling(window=sell_window).min().shift(1)
 
@@ -255,11 +242,9 @@ with st.spinner("正在從 Yahoo Finance 獲取最新股價與智慧對照名稱
       buy_target = float(latest["Buy_Line"])
       sell_target = float(latest["Sell_Line"])
 
-      # 計算距離買進價與賣出價的百分比
       dist_to_buy = ((buy_target - current_price) / current_price) * 100
       dist_to_sell = ((current_price - sell_target) / current_price) * 100
 
-      # 判斷買賣訊號狀態
       if current_price > buy_target:
         status = "🔥 突破買進訊號"
       elif current_price < sell_target:
@@ -293,23 +278,39 @@ if summary_list:
     st.divider()
     st.header("🔔 推播通知設定")
     if st.button("📤 發送今日買賣訊號到 Telegram", use_container_width=True):
-      alert_msg = (
-          f"<b>📈 海龜策略看盤訊號通知</b>\n時間："
-          f" {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
-      )
-      for item in summary_list:
-        alert_msg += (
-            f"<b>{item['代號與名稱']}</b> | 現價: <b>{item['現價']}</b>\n"
-            f"狀態: {item['狀態']}\n"
-            f"買點({item[f'前{buy_window}日高(買點)']}): 距 {item['距買進']}\n"
-            f"賣點({item[f'前{sell_window}日低(賣點)']}): 距 {item['距賣出']}\n"
-            "-------------------\n"
+      # 過濾出有觸發買進或賣出的股票
+      triggered_items = [
+          item
+          for item in summary_list
+          if "突破買進訊號" in item["狀態"] or "跌破賣出訊號" in item["狀態"]
+      ]
+
+      if not triggered_items:
+        alert_msg = (
+            f"<b>📈 海龜策略看盤訊號通知</b>\n時間："
+            f" {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+            "目前監控清單中的股票皆在<b>盤整觀望中</b>，無觸發買賣訊號。"
         )
+      else:
+        alert_msg = (
+            f"<b>🚨 海龜策略交易訊號快報</b>\n時間："
+            f" {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+        )
+        for item in triggered_items:
+          alert_msg += (
+              f"<b>{item['代號與名稱']}</b> | 現價: <b>{item['現價']}</b>\n"
+              f"狀態: <b>{item['狀態']}</b>\n"
+              f"買點({item[f'前{buy_window}日高(買點)']}): 距 {item['距買進']}\n"
+              f"賣點({item[f'前{sell_window}日低(賣點)']}): 距 {item['距賣出']}\n"
+              "-------------------\n"
+          )
 
       with st.spinner("正在發送 Telegram 推播..."):
         success = send_telegram_alert(alert_msg)
         if success:
-          st.success("✅ Telegram 推播發送成功！請查看手機。")
+          st.success("✅ Telegram 推播發送成功！")
+          # 彈出視窗顯示發報內容預覽
+          st.info(f"📋 **本次發報內容預覽**：\n\n{alert_msg.replace('<B>', '**').replace('</B>', '**').replace('<br>', '\n')}")
         else:
           st.error("❌ 發送失敗，請確認 Streamlit Secrets 設定是否正確。")
 
@@ -322,13 +323,10 @@ if summary_list:
   )
 
   if selected_ticker:
-    plot_df = stock_data_dict[selected_ticker].tail(
-        90
-    )  # 顯示最近 90 個交易日走勢
+    plot_df = stock_data_dict[selected_ticker].tail(90)
 
     fig = go.Figure()
 
-    # K線圖
     fig.add_trace(
         go.Candlestick(
             x=plot_df.index,
@@ -340,7 +338,6 @@ if summary_list:
         )
     )
 
-    # 10日突破買進線
     fig.add_trace(
         go.Scatter(
             x=plot_df.index,
@@ -351,7 +348,6 @@ if summary_list:
         )
     )
 
-    # 60日跌破賣出線
     fig.add_trace(
         go.Scatter(
             x=plot_df.index,
