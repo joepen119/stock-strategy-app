@@ -58,6 +58,23 @@ def send_telegram_alert(message):
     return False
 
 
+# 取得股票中文/公司名稱的輔助函式
+@st.cache_data(ttl=86400)  # 快取一天，避免重複查詢
+def get_stock_name(ticker):
+  try:
+    stock = yf.Ticker(ticker)
+    info = stock.info
+    # 優先抓取中文名稱或長期慣用名稱，若無則抓 shortName 或 longName
+    name = (
+        info.get("longName")
+        or info.get("shortName")
+        or info.get("symbol", ticker)
+    )
+    return name
+  except Exception:
+    return ticker
+
+
 # 處理新增股票代號的回呼函式
 def add_ticker_callback():
   raw_input = st.session_state.new_ticker_input.strip().upper()
@@ -138,9 +155,13 @@ if not tickers:
 summary_list = []
 stock_data_dict = {}
 
-with st.spinner("正在從 Yahoo Finance 獲取最新股價資料..."):
+with st.spinner("正在從 Yahoo Finance 獲取最新股價與名稱資料..."):
   for ticker in tickers:
     try:
+      # 取得股票名稱
+      stock_name = get_stock_name(ticker)
+      display_name = f"{ticker} ({stock_name})"
+
       # 抓取足夠計算 60 日均線與高低點的歷史資料 (抓 6 個月)
       df = yf.download(ticker, period="6mo", interval="1d", progress=False)
 
@@ -177,7 +198,7 @@ with st.spinner("正在從 Yahoo Finance 獲取最新股價資料..."):
         status = "👀 盤整觀望中"
 
       summary_list.append({
-          "代號": ticker,
+          "代號與名稱": display_name,
           "現價": round(current_price, 2),
           "狀態": status,
           f"前{buy_window}日高(買點)": round(buy_target, 2),
@@ -186,7 +207,7 @@ with st.spinner("正在從 Yahoo Finance 獲取最新股價資料..."):
           "距賣出": f"{dist_to_sell:+.2f}%",
       })
 
-      stock_data_dict[ticker] = df
+      stock_data_dict[display_name] = df
 
     except Exception as e:
       st.error(f"讀取 {ticker} 時發生錯誤：{e}")
@@ -208,7 +229,7 @@ if summary_list:
       )
       for item in summary_list:
         alert_msg += (
-            f"<b>{item['代號']}</b> | 現價: <b>{item['現價']}</b>\n"
+            f"<b>{item['代號與名稱']}</b> | 現價: <b>{item['現價']}</b>\n"
             f"狀態: {item['狀態']}\n"
             f"買點({item[f'前{buy_window}日高(買點)']}): 距 {item['距買進']}\n"
             f"賣點({item[f'前{sell_window}日低(賣點)']}): 距 {item['距賣出']}\n"
