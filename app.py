@@ -12,6 +12,23 @@ st.set_page_config(
     page_title="海龜交易策略看盤系統", page_icon="📈", layout="wide"
 )
 
+# 注入手機與電腦響應式優化 CSS
+st.markdown(
+    """
+    <style>
+    /* 調整表格在手機上的顯示，允許左右捲動 */
+    div[data-testid="stDataFrame"] {
+        overflow-x: auto;
+    }
+    /* 優化手機與電腦上的按鈕觸控體驗 */
+    .stButton button {
+        width: 100%;
+    }
+    </style>
+""",
+    unsafe_allow_html=True,
+)
+
 # 清單與名稱快取儲存檔案路徑
 WATCHLIST_FILE = "watchlist.json"
 NAMES_CACHE_FILE = "names_cache.json"
@@ -235,7 +252,7 @@ with st.spinner("正在從 Yahoo Finance 獲取最新股價與智慧對照名稱
   for ticker in tickers:
     try:
       stock_name = get_stock_name(ticker)
-      display_label = f"{ticker} ({stock_name})"  # 供圖表下拉選單與 Telegram 使用
+      display_label = f"{ticker} ({stock_name})"
 
       df = yf.download(ticker, period="6mo", interval="1d", progress=False)
 
