@@ -62,8 +62,8 @@ def send_telegram_alert(message):
 def add_ticker_callback():
   raw_input = st.session_state.new_ticker_input.strip().upper()
   if raw_input:
-    # 若純數字（台股代號），自動補上 .TW
-    if raw_input.isdigit():
+    # 支援台股代號與帶英文字母的主動式 ETF（如 00981A 自動補 .TW）
+    if raw_input[0].isdigit() and "." not in raw_input:
       formatted_ticker = f"{raw_input}.TW"
     else:
       formatted_ticker = raw_input
@@ -87,14 +87,14 @@ with st.sidebar:
   st.text_input(
       "輸入股票代號 (按 Enter 自動加入)",
       key="new_ticker_input",
-      placeholder="例如：2603 或 00919 或 NVDA",
+      placeholder="例如：2603 或 00981A 或 NVDA",
       on_change=add_ticker_callback,
   )
   st.button("➕ 加入清單", on_click=add_ticker_callback, use_container_width=True)
 
   st.caption(
-      "💡 提示：台股上市股票直接輸入數字（如 `2330`）會自動補上"
-      " `.TW`；上櫃請輸入完整代號（如 `6488.TWO`）。"
+      "💡 提示：台股上市股票或主動式 ETF 直接輸入代號（如 `2330` 或"
+      " `00981A`）會自動補上 `.TW`；上櫃請輸入完整代號（如 `6488.TWO`）。"
   )
 
   # 管理目前清單（可點選 X 移除不要的股票）
